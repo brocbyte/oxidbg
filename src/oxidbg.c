@@ -42,10 +42,29 @@ int main() {
       OXILog("EXIT_THREAD_DEBUG_EVENT\n");
     } break;
     case LOAD_DLL_DEBUG_EVENT: {
-      OXILog("LOAD_DLL_DEBUG_EVENT\n");
+      OXILog("LOAD_DLL_DEBUG_EVENT: ");
+      LOAD_DLL_DEBUG_INFO info = debugEvent.u.LoadDll;
+      TCHAR *buff = malloc(256 * sizeof(TCHAR));
+      GetFinalPathNameByHandle(info.hFile, buff, 256, FILE_NAME_NORMALIZED);
+      OXILog("\'%ls\'\n", buff);
+
     } break;
     case OUTPUT_DEBUG_STRING_EVENT: {
-      OXILog("OUTPUT_DEBUG_STRING_EVENT\n");
+      OXILog("OUTPUT_DEBUG_STRING_EVENT: ");
+      OUTPUT_DEBUG_STRING_INFO info = debugEvent.u.DebugString;
+      void *buff = malloc(info.nDebugStringLength);
+      memset(buff, 0, info.nDebugStringLength);
+      if (info.fUnicode) {
+        size_t written = 0;
+        OXIAssert(ReadProcessMemory(processInformation.hProcess,
+                                    info.lpDebugStringData, buff,
+                                    info.nDebugStringLength, &written));
+        if (*(wchar_t *)buff) {
+          OXILog("\'%ls\'\n", (wchar_t *)buff);
+        }
+      } else {
+        OXILog("\'%s\'\n", (char *)buff);
+      }
     } break;
     case RIP_EVENT: {
       OXILog("RIP_EVENT\n");
