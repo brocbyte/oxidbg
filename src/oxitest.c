@@ -1,7 +1,11 @@
+#define UNICODE
+#define _UNICODE
+
+#include <tchar.h>
+#include <wchar.h>
 #include <windows.h>
 
 int main() {
-    printf("HELLLLLLOOOOO FROM TEST\n");
-    OutputDebugStringW(L"Hello from subprocess debug!");
+    OutputDebugString(_TEXT("Hello from subprocess debug!"));
     return 0;
 }

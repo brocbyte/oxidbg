@@ -1,1 +1,1 @@
-build_oxidbg\oxidbg.exe	 	build_oxitest\oxitest.exe
+build_oxidbg\oxidbg.exe build_oxitest\oxitest.exe

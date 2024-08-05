@@ -28,6 +28,9 @@ int main() {
   while (true) {
     DEBUG_EVENT debugEvent;
     OXIAssert(WaitForDebugEventEx(&debugEvent, INFINITE));
+
+    DWORD continueStatus = DBG_EXCEPTION_NOT_HANDLED;
+
     switch (debugEvent.dwDebugEventCode) {
     case CREATE_PROCESS_DEBUG_EVENT: {
       OXILog("CREATE_PROCESS_DEBUG_EVENT\n");
@@ -37,6 +40,10 @@ int main() {
     } break;
     case EXCEPTION_DEBUG_EVENT: {
       OXILog("EXCEPTION_DEBUG_EVENT\n");
+      if (debugEvent.u.Exception.ExceptionRecord.ExceptionCode ==
+          EXCEPTION_SINGLE_STEP) {
+        continueStatus = DBG_CONTINUE;
+      }
     } break;
     case EXIT_THREAD_DEBUG_EVENT: {
       OXILog("EXIT_THREAD_DEBUG_EVENT\n");
@@ -47,24 +54,24 @@ int main() {
       TCHAR *buff = malloc(256 * sizeof(TCHAR));
       GetFinalPathNameByHandle(info.hFile, buff, 256, FILE_NAME_NORMALIZED);
       OXILog("\'%ls\'\n", buff);
-
+      free(buff);
     } break;
     case OUTPUT_DEBUG_STRING_EVENT: {
       OXILog("OUTPUT_DEBUG_STRING_EVENT: ");
       OUTPUT_DEBUG_STRING_INFO info = debugEvent.u.DebugString;
       void *buff = malloc(info.nDebugStringLength);
       memset(buff, 0, info.nDebugStringLength);
+      OXIAssert(ReadProcessMemory(processInformation.hProcess,
+                                  info.lpDebugStringData, buff,
+                                  info.nDebugStringLength, 0));
       if (info.fUnicode) {
-        size_t written = 0;
-        OXIAssert(ReadProcessMemory(processInformation.hProcess,
-                                    info.lpDebugStringData, buff,
-                                    info.nDebugStringLength, &written));
         if (*(wchar_t *)buff) {
           OXILog("\'%ls\'\n", (wchar_t *)buff);
         }
       } else {
         OXILog("\'%s\'\n", (char *)buff);
       }
+      free(buff);
     } break;
     case RIP_EVENT: {
       OXILog("RIP_EVENT\n");
@@ -77,8 +84,24 @@ int main() {
       exit(0);
     } break;
     }
+
+    HANDLE hThread = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT, FALSE,
+                                debugEvent.dwThreadId);
+    OXIAssert(hThread);
+    CONTEXT threadCtx = {.ContextFlags = CONTEXT_ALL};
+    OXIAssert(GetThreadContext(hThread, &threadCtx));
+    OXILog("rip: %llx\n", threadCtx.Rip);
+
+    char s[256];
+    scanf("%s", s);
+    if (!strcmp(s, "g")) {
+    } else if (!strcmp(s, "si")) {
+      threadCtx.EFlags |= 1 << 8;
+    }
+    OXIAssert(SetThreadContext(hThread, &threadCtx));
+
     ContinueDebugEvent(debugEvent.dwProcessId, debugEvent.dwThreadId,
-                       DBG_EXCEPTION_NOT_HANDLED);
+                       continueStatus);
   }
   return 0;
 }
