@@ -8,5 +8,5 @@ cl /nologo %src%oxitest.c
 popd
 
 pushd build_oxidbg
-cl /nologo %src%oxidbg.c
+cl /W3 /Zi /nologo /I ..\imgui /I ..\imgui\backends %src%oxidbg.c %src%oxiimgui.cpp user32.lib D3D12.lib DXGI.lib ..\imgui\backends\imgui_impl_dx12.cpp ..\imgui\backends\imgui_impl_win32.cpp ..\imgui\imgui*.cpp
 popd
