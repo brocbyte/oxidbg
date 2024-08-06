@@ -10,7 +10,9 @@ extern FILE *logFile;
 
 #define OXILog(...)                                                                                \
   do {                                                                                             \
-    fprintf(logFile, __VA_ARGS__);                                                                 \
+    if (logFile) { \
+      fprintf(logFile, __VA_ARGS__);                                                                 \
+    } \
   } while (false)
 
 #define OXIAssertT(exp, ...)                                                                       \

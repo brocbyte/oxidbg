@@ -2,3 +2,4 @@ build_oxidbg/
 build_oxitest/
 .vscode/settings.json
 *.ini
+*.log

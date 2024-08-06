@@ -6,6 +6,7 @@
 #include <wchar.h>
 
 #include <windows.h>
+#include <process.h>
 
 #include <d3d12.h>
 #include <dxgi1_4.h>
@@ -48,63 +49,13 @@ void WaitForLastSubmittedFrame();
 FrameContext *WaitForNextFrameResources();
 LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
-FILE *logFile;
+FILE *logFile = 0;
 const TCHAR *whitespace = _TEXT(" \f\n\r\t\v");
 
-int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow) {
-  WNDCLASSEXW wc = {sizeof(wc), CS_CLASSDC, WndProc,          0L, 0L, GetModuleHandle(0), 0, 0,
-                    0,          0,          L"ImGui Example", 0};
-  RegisterClassExW(&wc);
-  HWND hwnd = CreateWindowW(wc.lpszClassName, L"Dear ImGui DirectX12 Example", WS_OVERLAPPEDWINDOW,
-                            100, 100, 1280, 800, 0, 0, wc.hInstance, 0);
+void dbgThread(void *param) {
 
-  // Initialize Direct3D
-  if (!CreateDeviceD3D(hwnd)) {
-    CleanupDeviceD3D();
-    UnregisterClassW(wc.lpszClassName, wc.hInstance);
-    return -1;
-  }
+  i64* pRip = (i64*)param;
 
-  // Show the window
-  ShowWindow(hwnd, SW_SHOWDEFAULT);
-  UpdateWindow(hwnd);
-
-  D3D12_CPU_DESCRIPTOR_HANDLE h1;
-  D3D12_GPU_DESCRIPTOR_HANDLE h2;
-  g_pd3dSrvDescHeap->lpVtbl->GetCPUDescriptorHandleForHeapStart(g_pd3dSrvDescHeap, &h1);
-  g_pd3dSrvDescHeap->lpVtbl->GetGPUDescriptorHandleForHeapStart(g_pd3dSrvDescHeap, &h2);
-  OXIImGuiInit(hwnd, g_pd3dDevice, NUM_FRAMES_IN_FLIGHT, DXGI_FORMAT_R8G8B8A8_UNORM,
-               g_pd3dSrvDescHeap, h1, h2);
-
-  // Main loop
-  bool done = false;
-  while (!done) {
-    // Poll and handle messages (inputs, window resize, etc.)
-    // See the WndProc() function below for our to dispatch events to the Win32
-    // backend.
-    MSG msg;
-    while (PeekMessage(&msg, 0, 0U, 0U, PM_REMOVE)) {
-      TranslateMessage(&msg);
-      DispatchMessage(&msg);
-      if (msg.message == WM_QUIT)
-        done = true;
-    }
-    if (done)
-      break;
-
-    // Handle window screen locked
-    if (g_SwapChainOccluded &&
-        g_pSwapChain->lpVtbl->Present(g_pSwapChain, 0, DXGI_PRESENT_TEST) == DXGI_STATUS_OCCLUDED) {
-      Sleep(10);
-      continue;
-    }
-    g_SwapChainOccluded = false;
-
-    OXIImGuiBegFrame();
-    OXIImGuiEndFrame();
-  }
-
-  logFile = stderr;
   TCHAR *processCmdLine = _tcsdup(GetCommandLine());
 
   TCHAR *space = processCmdLine + _tcscspn(processCmdLine, whitespace);
@@ -119,6 +70,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
   OXIAssert(CreateProcess(0, space, 0, 0, false, DEBUG_ONLY_THIS_PROCESS | CREATE_NEW_CONSOLE, 0, 0,
                           &startupInfo, &processInformation));
+
   while (true) {
     DEBUG_EVENT debugEvent;
     OXIAssert(WaitForDebugEventEx(&debugEvent, INFINITE));
@@ -147,6 +99,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
       TCHAR *buff = malloc(256 * sizeof(TCHAR));
       GetFinalPathNameByHandle(info.hFile, buff, 256, FILE_NAME_NORMALIZED);
       OXILog("\'%ls\'\n", buff);
+      OutputDebugString(_TEXT("DLL LOADED!!!!\n"));
       free(buff);
     } break;
     case OUTPUT_DEBUG_STRING_EVENT: {
@@ -183,17 +136,75 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     CONTEXT threadCtx = {.ContextFlags = CONTEXT_ALL};
     OXIAssert(GetThreadContext(hThread, &threadCtx));
     OXILog("rip: %llx\n", threadCtx.Rip);
+    *pRip = threadCtx.Rip;
+    Sleep(1000);
 
-    char s[256];
-    scanf("%s", s);
-    if (!strcmp(s, "g")) {
-    } else if (!strcmp(s, "si")) {
-      threadCtx.EFlags |= 1 << 8;
-    }
+    // threadCtx.EFlags |= 1 << 8;
     OXIAssert(SetThreadContext(hThread, &threadCtx));
 
     ContinueDebugEvent(debugEvent.dwProcessId, debugEvent.dwThreadId, continueStatus);
   }
+
+  _endthread();
+}
+
+int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow) {
+  logFile = fopen("last_run.log", "w");
+  WNDCLASSEXW wc = {sizeof(wc), CS_CLASSDC, WndProc,          0L, 0L, GetModuleHandle(0), 0, 0,
+                    0,          0,          L"ImGui Example", 0};
+  RegisterClassExW(&wc);
+  HWND hwnd = CreateWindowW(wc.lpszClassName, L"Dear ImGui DirectX12 Example", WS_OVERLAPPEDWINDOW,
+                            100, 100, 1280, 800, 0, 0, wc.hInstance, 0);
+
+  // Initialize Direct3D
+  if (!CreateDeviceD3D(hwnd)) {
+    CleanupDeviceD3D();
+    UnregisterClassW(wc.lpszClassName, wc.hInstance);
+    return -1;
+  }
+
+  // Show the window
+   ShowWindow(hwnd, SW_SHOWDEFAULT); UpdateWindow(hwnd);
+   D3D12_CPU_DESCRIPTOR_HANDLE h1; D3D12_GPU_DESCRIPTOR_HANDLE h2;
+   g_pd3dSrvDescHeap->lpVtbl->GetCPUDescriptorHandleForHeapStart(g_pd3dSrvDescHeap, &h1);
+   g_pd3dSrvDescHeap->lpVtbl->GetGPUDescriptorHandleForHeapStart(g_pd3dSrvDescHeap, &h2);
+   OXIImGuiInit(hwnd, g_pd3dDevice, NUM_FRAMES_IN_FLIGHT, DXGI_FORMAT_R8G8B8A8_UNORM,
+   g_pd3dSrvDescHeap, h1, h2);
+
+   i64 rip;
+  _beginthread(
+    dbgThread, // lpStartAddress
+   0, &rip
+  );
+
+  // Main loop
+  bool done = false;
+  while (!done) {
+    // Poll and handle messages (inputs, window resize, etc.)
+    // See the WndProc() function below for our to dispatch events to the Win32
+    // backend.
+    MSG msg;
+    while (PeekMessage(&msg, 0, 0U, 0U, PM_REMOVE)) {
+      TranslateMessage(&msg);
+      DispatchMessage(&msg);
+      if (msg.message == WM_QUIT)
+        done = true;
+    }
+    if (done)
+      break;
+
+    // Handle window screen locked
+    if (g_SwapChainOccluded &&
+        g_pSwapChain->lpVtbl->Present(g_pSwapChain, 0, DXGI_PRESENT_TEST) == DXGI_STATUS_OCCLUDED) {
+      Sleep(10);
+      continue;
+    }
+    g_SwapChainOccluded = false;
+
+    OXIImGuiBegFrame(rip);
+    OXIImGuiEndFrame();
+  }
+
   return 0;
 }
 

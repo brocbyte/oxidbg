@@ -70,13 +70,16 @@ void OXIImGuiInit(HWND hwnd, ID3D12Device *device, int num_frames_in_flight, DXG
                       font_srv_cpu_desc_handle, font_srv_gpu_desc_handle);
 }
 
-void OXIImGuiBegFrame() {
+void OXIImGuiBegFrame(i64 rip) {
   // (Your code process and dispatch Win32 messages)
   // Start the Dear ImGui frame
   ImGui_ImplDX12_NewFrame();
   ImGui_ImplWin32_NewFrame();
   ImGui::NewFrame();
-  ImGui::ShowDemoWindow(); // Show demo window! :)
+
+  //ImGui::ShowDemoWindow(); // Show demo window! :)
+
+  ImGui::Text("Hello, world %p", rip);
 }
 
 void OXIImGuiEndFrame() {
