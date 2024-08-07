@@ -6,6 +6,10 @@
 #include <windows.h>
 
 int main() {
-    OutputDebugString(_TEXT("Hello from subprocess debug!"));
+    int i = 0; 
+    while (i++ < 100) {
+      OutputDebugString(_TEXT("Hello from subprocess debug!"));
+      Sleep(100);
+    }
     return 0;
 }

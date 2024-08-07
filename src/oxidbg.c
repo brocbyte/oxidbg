@@ -20,6 +20,8 @@
 #pragma comment(lib, "dxguid.lib")
 #endif
 
+CRITICAL_SECTION critical;
+
 // Data
 #define NUM_FRAMES_IN_FLIGHT 3
 FrameContext g_frameContext[NUM_FRAMES_IN_FLIGHT] = {0};
@@ -53,8 +55,7 @@ FILE *logFile = 0;
 const TCHAR *whitespace = _TEXT(" \f\n\r\t\v");
 
 void dbgThread(void *param) {
-
-  i64* pRip = (i64*)param;
+  UIData* pData = (UIData*)param;
 
   TCHAR *processCmdLine = _tcsdup(GetCommandLine());
 
@@ -136,10 +137,23 @@ void dbgThread(void *param) {
     CONTEXT threadCtx = {.ContextFlags = CONTEXT_ALL};
     OXIAssert(GetThreadContext(hThread, &threadCtx));
     OXILog("rip: %llx\n", threadCtx.Rip);
-    *pRip = threadCtx.Rip;
-    Sleep(1000);
 
-    // threadCtx.EFlags |= 1 << 8;
+
+    // pass data to UI; wait for instructions
+    EnterCriticalSection(&critical);
+    pData->ctx = threadCtx;
+    LeaveCriticalSection(&critical);
+
+    EnterCriticalSection(&pData->critical_section);
+    while (!pData->commandEntered) {
+      SleepConditionVariableCS(&pData->condition_variable, &pData->critical_section, INFINITE);
+    }
+    pData->commandEntered = false;
+    LeaveCriticalSection(&pData->critical_section);
+    WakeConditionVariable(&pData->condition_variable); 
+
+
+    threadCtx.EFlags |= 1 << 8;
     OXIAssert(SetThreadContext(hThread, &threadCtx));
 
     ContinueDebugEvent(debugEvent.dwProcessId, debugEvent.dwThreadId, continueStatus);
@@ -150,6 +164,9 @@ void dbgThread(void *param) {
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow) {
   logFile = fopen("last_run.log", "w");
+
+  InitializeCriticalSection(&critical);
+
   WNDCLASSEXW wc = {sizeof(wc), CS_CLASSDC, WndProc,          0L, 0L, GetModuleHandle(0), 0, 0,
                     0,          0,          L"ImGui Example", 0};
   RegisterClassExW(&wc);
@@ -171,10 +188,13 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
    OXIImGuiInit(hwnd, g_pd3dDevice, NUM_FRAMES_IN_FLIGHT, DXGI_FORMAT_R8G8B8A8_UNORM,
    g_pd3dSrvDescHeap, h1, h2);
 
-   i64 rip;
+   UIData uiData;
+   InitializeConditionVariable(&uiData.condition_variable);
+   InitializeCriticalSection(&uiData.critical_section);
+
   _beginthread(
     dbgThread, // lpStartAddress
-   0, &rip
+   0, &uiData
   );
 
   // Main loop
@@ -201,7 +221,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     }
     g_SwapChainOccluded = false;
 
-    OXIImGuiBegFrame(rip);
+
+    EnterCriticalSection(&critical);
+    OXIImGuiBegFrame(&uiData);
+    LeaveCriticalSection(&critical);
+
     OXIImGuiEndFrame();
   }
 

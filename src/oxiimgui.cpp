@@ -70,16 +70,50 @@ void OXIImGuiInit(HWND hwnd, ID3D12Device *device, int num_frames_in_flight, DXG
                       font_srv_cpu_desc_handle, font_srv_gpu_desc_handle);
 }
 
-void OXIImGuiBegFrame(i64 rip) {
-  // (Your code process and dispatch Win32 messages)
-  // Start the Dear ImGui frame
+static void tableRegisterHelper(const char* regName, i64 regValue) {
+  ImGui::TableNextRow();
+  ImGui::TableSetColumnIndex(0);
+  ImGui::Text(regName);
+  ImGui::TableSetColumnIndex(1);
+  ImGui::Text("%p", regValue);
+}
+
+void OXIImGuiBegFrame(UIData* data) {
   ImGui_ImplDX12_NewFrame();
   ImGui_ImplWin32_NewFrame();
   ImGui::NewFrame();
 
-  //ImGui::ShowDemoWindow(); // Show demo window! :)
+  if (ImGui::BeginTable("Registers", 2, ImGuiTableFlags_Borders)) {
+    tableRegisterHelper("rip", data->ctx.Rip);
+    tableRegisterHelper("rax", data->ctx.Rax);
+    tableRegisterHelper("rcx", data->ctx.Rcx);
+    tableRegisterHelper("rdx", data->ctx.Rdx);
+    tableRegisterHelper("rbx", data->ctx.Rbx);
+    tableRegisterHelper("rsp", data->ctx.Rsp);
+    tableRegisterHelper("rbp", data->ctx.Rbp);
+    tableRegisterHelper("rsi", data->ctx.Rsi);
+    tableRegisterHelper("rdi", data->ctx.Rdi);
+    tableRegisterHelper("r8", data->ctx.R8);
+    tableRegisterHelper("r9", data->ctx.R9);
+    tableRegisterHelper("r10", data->ctx.R10);
+    tableRegisterHelper("r11", data->ctx.R11);
+    tableRegisterHelper("r12", data->ctx.R12);
+    tableRegisterHelper("r13", data->ctx.R13);
+    tableRegisterHelper("r14", data->ctx.R14);
+    tableRegisterHelper("r15", data->ctx.R15);
+    ImGui::EndTable();
+  }
 
-  ImGui::Text("Hello, world %p", rip);
+  if (ImGui::Button("Step Into")) {
+    EnterCriticalSection(&data->critical_section);
+    while (data->commandEntered) {
+      SleepConditionVariableCS(&data->condition_variable, &data->critical_section, INFINITE);
+    }
+    data->commandEntered = true;
+    LeaveCriticalSection(&data->critical_section);
+
+    WakeConditionVariable(&data->condition_variable); 
+  }
 }
 
 void OXIImGuiEndFrame() {
