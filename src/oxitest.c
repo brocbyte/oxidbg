@@ -1,6 +1,3 @@
-#define UNICODE
-#define _UNICODE
-
 #include <tchar.h>
 #include <wchar.h>
 #include <windows.h>

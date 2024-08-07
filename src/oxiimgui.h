@@ -8,11 +8,20 @@ typedef struct FrameContext {
   UINT64 FenceValue;
 } FrameContext;
 
+enum OXIDbgCommand {
+  OXIDbgCommand_None,
+  OXIDbgCommand_Go,
+  OXIDbgCommand_StepInto
+};
+
 typedef struct UIData {
   CONTEXT ctx;
-  bool commandEntered;
+  enum OXIDbgCommand commandEntered;
   CONDITION_VARIABLE condition_variable;
   CRITICAL_SECTION critical_section;
+
+  TCHAR dll[64][256];
+  u32 nDll;
 } UIData;
 
 #ifdef __cplusplus

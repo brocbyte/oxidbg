@@ -1,9 +1,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define UNICODE
-#define _UNICODE
-
 #include <stdio.h>
 
 extern FILE *logFile;

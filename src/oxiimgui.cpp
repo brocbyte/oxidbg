@@ -104,14 +104,27 @@ void OXIImGuiBegFrame(UIData* data) {
     ImGui::EndTable();
   }
 
+  for (u32 i = 0; i < data->nDll; ++i) {
+    ImGui::Text("%ls", data->dll[i]);
+  }
+
   if (ImGui::Button("Step Into")) {
     EnterCriticalSection(&data->critical_section);
-    while (data->commandEntered) {
+    while (data->commandEntered != OXIDbgCommand_None) {
       SleepConditionVariableCS(&data->condition_variable, &data->critical_section, INFINITE);
     }
-    data->commandEntered = true;
+    data->commandEntered = OXIDbgCommand_StepInto;
     LeaveCriticalSection(&data->critical_section);
+    WakeConditionVariable(&data->condition_variable); 
+  }
 
+  if (ImGui::Button("Go")) {
+    EnterCriticalSection(&data->critical_section);
+    while (data->commandEntered != OXIDbgCommand_None) {
+      SleepConditionVariableCS(&data->condition_variable, &data->critical_section, INFINITE);
+    }
+    data->commandEntered = OXIDbgCommand_Go;
+    LeaveCriticalSection(&data->critical_section);
     WakeConditionVariable(&data->condition_variable); 
   }
 }

@@ -78,6 +78,9 @@ void dbgThread(void *param) {
 
     DWORD continueStatus = DBG_EXCEPTION_NOT_HANDLED;
 
+    // pass data to UI; wait for instructions
+    EnterCriticalSection(&critical);
+
     switch (debugEvent.dwDebugEventCode) {
     case CREATE_PROCESS_DEBUG_EVENT: {
       OXILog("CREATE_PROCESS_DEBUG_EVENT\n");
@@ -97,11 +100,11 @@ void dbgThread(void *param) {
     case LOAD_DLL_DEBUG_EVENT: {
       OXILog("LOAD_DLL_DEBUG_EVENT: ");
       LOAD_DLL_DEBUG_INFO info = debugEvent.u.LoadDll;
-      TCHAR *buff = malloc(256 * sizeof(TCHAR));
-      GetFinalPathNameByHandle(info.hFile, buff, 256, FILE_NAME_NORMALIZED);
+
+      TCHAR* buff = pData->dll[pData->nDll++];
+      GetFinalPathNameByHandle(info.hFile, buff, sizeof(pData->dll[0]) / sizeof(pData->dll[0][0]), FILE_NAME_NORMALIZED);
       OXILog("\'%ls\'\n", buff);
       OutputDebugString(_TEXT("DLL LOADED!!!!\n"));
-      free(buff);
     } break;
     case OUTPUT_DEBUG_STRING_EVENT: {
       OXILog("OUTPUT_DEBUG_STRING_EVENT: ");
@@ -139,21 +142,22 @@ void dbgThread(void *param) {
     OXILog("rip: %llx\n", threadCtx.Rip);
 
 
-    // pass data to UI; wait for instructions
-    EnterCriticalSection(&critical);
     pData->ctx = threadCtx;
     LeaveCriticalSection(&critical);
 
     EnterCriticalSection(&pData->critical_section);
-    while (!pData->commandEntered) {
+    while (pData->commandEntered == OXIDbgCommand_None) {
       SleepConditionVariableCS(&pData->condition_variable, &pData->critical_section, INFINITE);
     }
-    pData->commandEntered = false;
+    enum OXIDbgCommand command = pData->commandEntered;
+    pData->commandEntered = OXIDbgCommand_None;
     LeaveCriticalSection(&pData->critical_section);
     WakeConditionVariable(&pData->condition_variable); 
 
 
-    threadCtx.EFlags |= 1 << 8;
+    if (command == OXIDbgCommand_StepInto) {
+      threadCtx.EFlags |= 1 << 8;
+    }
     OXIAssert(SetThreadContext(hThread, &threadCtx));
 
     ContinueDebugEvent(debugEvent.dwProcessId, debugEvent.dwThreadId, continueStatus);
@@ -188,7 +192,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
    OXIImGuiInit(hwnd, g_pd3dDevice, NUM_FRAMES_IN_FLIGHT, DXGI_FORMAT_R8G8B8A8_UNORM,
    g_pd3dSrvDescHeap, h1, h2);
 
-   UIData uiData;
+   UIData uiData = {0};
    InitializeConditionVariable(&uiData.condition_variable);
    InitializeCriticalSection(&uiData.critical_section);
 
