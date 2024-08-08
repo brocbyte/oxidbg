@@ -30,5 +30,5 @@ set libs=xed.lib user32.lib D3D12.lib DXGI.lib
 set link=/LIBPATH:..\xed\install\lib
 
 pushd build_oxidbg
-cl /nologo %unicode% /MT /W3 /Zi %headers% %src%oxidbg.c %src%oxiimgui.cpp %imgui_src% /link %link% %libs% 
+cl /nologo %unicode% /MT /W3 /Zi %headers% %src%oxidbg.c %src%oxidec.c %src%oxiimgui.cpp %imgui_src% /link %link% %libs% 
 popd

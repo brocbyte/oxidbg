@@ -1,10 +1,9 @@
 #include "oxiimgui.h"
+#include "oxidec.h"
 
 #include "imgui.h"
 #include "imgui_impl_dx12.h"
 #include "imgui_impl_win32.h"
-
-#include "xed/xed-interface.h"
 
 #include <windows.h>
 
@@ -112,11 +111,7 @@ void OXIImGuiBegFrame(UIData* data) {
   }
 
   char instructionsString[256] = {0};
-  char *p = instructionsString; 
-  for (int i = 0; i < sizeof(data->instructions); ++i) {
-    sprintf(p, "%02hhx ", data->instructions[i]);
-    p += strlen(p);
-  }
+  decodeInstruction(data->instructions, sizeof(data->instructions), instructionsString, sizeof(instructionsString));
   ImGui::Text("%s", instructionsString);
 
   if (ImGui::Button("Step Into")) {

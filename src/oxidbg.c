@@ -20,6 +20,8 @@
 #pragma comment(lib, "dxguid.lib")
 #endif
 
+#include "xed/xed-interface.h"
+
 // Data
 #define NUM_FRAMES_IN_FLIGHT 3
 FrameContext g_frameContext[NUM_FRAMES_IN_FLIGHT] = {0};
@@ -173,6 +175,8 @@ void dbgThread(void *param) {
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow) {
   logFile = fopen("last_run.log", "w");
+
+  xed_tables_init();
 
   WNDCLASSEXW wc = {sizeof(wc), CS_CLASSDC, WndProc,          0L, 0L, GetModuleHandle(0), 0, 0,
                     0,          0,          L"ImGui Example", 0};

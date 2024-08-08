@@ -1,3 +1,4 @@
+#pragma once
 #include <d3d12.h>
 #include <dxgi1_4.h>
 #include <windows.h>
@@ -23,7 +24,7 @@ typedef struct UIData {
   TCHAR dll[64][256];
   u32 nDll;
 
-  char instructions[16];
+  u8 instructions[15];
 } UIData;
 
 #ifdef __cplusplus
