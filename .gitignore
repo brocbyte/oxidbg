@@ -3,3 +3,4 @@ build_oxitest/
 .vscode/settings.json
 *.ini
 *.log
+xed/install/
