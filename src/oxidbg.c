@@ -20,8 +20,6 @@
 #pragma comment(lib, "dxguid.lib")
 #endif
 
-CRITICAL_SECTION critical;
-
 // Data
 #define NUM_FRAMES_IN_FLIGHT 3
 FrameContext g_frameContext[NUM_FRAMES_IN_FLIGHT] = {0};
@@ -75,11 +73,9 @@ void dbgThread(void *param) {
   while (true) {
     DEBUG_EVENT debugEvent;
     OXIAssert(WaitForDebugEventEx(&debugEvent, INFINITE));
+    EnterCriticalSection(&pData->critical_section);
 
     DWORD continueStatus = DBG_EXCEPTION_NOT_HANDLED;
-
-    // pass data to UI; wait for instructions
-    EnterCriticalSection(&critical);
 
     switch (debugEvent.dwDebugEventCode) {
     case CREATE_PROCESS_DEBUG_EVENT: {
@@ -141,19 +137,28 @@ void dbgThread(void *param) {
     OXIAssert(GetThreadContext(hThread, &threadCtx));
     OXILog("rip: %llx\n", threadCtx.Rip);
 
-
+    // registers -> ui
     pData->ctx = threadCtx;
-    LeaveCriticalSection(&critical);
 
-    EnterCriticalSection(&pData->critical_section);
+    // instructions -> ui
+    OXIAssert(ReadProcessMemory(
+      processInformation.hProcess,
+      (void*)threadCtx.Rip,
+      pData->instructions,
+      sizeof(pData->instructions),
+      0
+    ));
+
+    // sleep until gui gives us some command to process
     while (pData->commandEntered == OXIDbgCommand_None) {
       SleepConditionVariableCS(&pData->condition_variable, &pData->critical_section, INFINITE);
     }
+
+    // we own critical section and have some command -> process
     enum OXIDbgCommand command = pData->commandEntered;
     pData->commandEntered = OXIDbgCommand_None;
     LeaveCriticalSection(&pData->critical_section);
     WakeConditionVariable(&pData->condition_variable); 
-
 
     if (command == OXIDbgCommand_StepInto) {
       threadCtx.EFlags |= 1 << 8;
@@ -168,8 +173,6 @@ void dbgThread(void *param) {
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow) {
   logFile = fopen("last_run.log", "w");
-
-  InitializeCriticalSection(&critical);
 
   WNDCLASSEXW wc = {sizeof(wc), CS_CLASSDC, WndProc,          0L, 0L, GetModuleHandle(0), 0, 0,
                     0,          0,          L"ImGui Example", 0};
@@ -225,11 +228,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     }
     g_SwapChainOccluded = false;
 
-
-    EnterCriticalSection(&critical);
     OXIImGuiBegFrame(&uiData);
-    LeaveCriticalSection(&critical);
-
     OXIImGuiEndFrame();
   }
 

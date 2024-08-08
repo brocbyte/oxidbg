@@ -83,6 +83,7 @@ void OXIImGuiBegFrame(UIData* data) {
   ImGui_ImplWin32_NewFrame();
   ImGui::NewFrame();
 
+  EnterCriticalSection(&data->critical_section);
   if (ImGui::BeginTable("Registers", 2, ImGuiTableFlags_Borders)) {
     tableRegisterHelper("rip", data->ctx.Rip);
     tableRegisterHelper("rax", data->ctx.Rax);
@@ -108,25 +109,30 @@ void OXIImGuiBegFrame(UIData* data) {
     ImGui::Text("%ls", data->dll[i]);
   }
 
+  char instructionsString[256] = {0};
+  char *p = instructionsString; 
+  for (int i = 0; i < sizeof(data->instructions); ++i) {
+    sprintf(p, "%02hhx ", data->instructions[i]);
+    p += strlen(p);
+  }
+  ImGui::Text("%s", instructionsString);
+
   if (ImGui::Button("Step Into")) {
-    EnterCriticalSection(&data->critical_section);
     while (data->commandEntered != OXIDbgCommand_None) {
       SleepConditionVariableCS(&data->condition_variable, &data->critical_section, INFINITE);
     }
     data->commandEntered = OXIDbgCommand_StepInto;
-    LeaveCriticalSection(&data->critical_section);
-    WakeConditionVariable(&data->condition_variable); 
   }
 
   if (ImGui::Button("Go")) {
-    EnterCriticalSection(&data->critical_section);
     while (data->commandEntered != OXIDbgCommand_None) {
       SleepConditionVariableCS(&data->condition_variable, &data->critical_section, INFINITE);
     }
     data->commandEntered = OXIDbgCommand_Go;
-    LeaveCriticalSection(&data->critical_section);
-    WakeConditionVariable(&data->condition_variable); 
   }
+
+  LeaveCriticalSection(&data->critical_section);
+  WakeConditionVariable(&data->condition_variable); 
 }
 
 void OXIImGuiEndFrame() {

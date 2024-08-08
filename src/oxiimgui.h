@@ -22,6 +22,8 @@ typedef struct UIData {
 
   TCHAR dll[64][256];
   u32 nDll;
+
+  char instructions[16];
 } UIData;
 
 #ifdef __cplusplus
