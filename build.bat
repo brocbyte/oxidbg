@@ -16,7 +16,7 @@ if not exist build_oxidbg mkdir build_oxidbg
 set unicode=/D UNICODE /D _UNICODE
 
 pushd build_oxitest
-cl /nologo %unicode% %src%oxitest.c
+clang -target x86_64-pc-windows-msvc -DUNICODE -D_UNICODE %src%oxitest.c -ooxitest.exe
 popd
 
 set imgui_headers=/I ..\imgui /I ..\imgui\backends 

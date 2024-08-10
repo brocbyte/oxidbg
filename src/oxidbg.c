@@ -81,31 +81,29 @@ void dbgThread(void *param) {
 
     switch (debugEvent.dwDebugEventCode) {
     case CREATE_PROCESS_DEBUG_EVENT: {
-      OXILog("CREATE_PROCESS_DEBUG_EVENT\n");
+      pData->reason = _TEXT("CREATE_PROCESS_DEBUG_EVENT");
     } break;
     case CREATE_THREAD_DEBUG_EVENT: {
-      OXILog("CREATE_THREAD_DEBUG_EVENT\n");
+      pData->reason = _TEXT("CREATE_THREAD_DEBUG_EVENT");
     } break;
     case EXCEPTION_DEBUG_EVENT: {
-      OXILog("EXCEPTION_DEBUG_EVENT\n");
+      pData->reason = _TEXT("EXCEPTION_DEBUG_EVENT");
       if (debugEvent.u.Exception.ExceptionRecord.ExceptionCode == EXCEPTION_SINGLE_STEP) {
         continueStatus = DBG_CONTINUE;
       }
     } break;
     case EXIT_THREAD_DEBUG_EVENT: {
-      OXILog("EXIT_THREAD_DEBUG_EVENT\n");
+      pData->reason = _TEXT("EXIT_THREAD_DEBUG_EVENT");
     } break;
     case LOAD_DLL_DEBUG_EVENT: {
-      OXILog("LOAD_DLL_DEBUG_EVENT: ");
+      pData->reason = _TEXT("LOAD_DLL_DEBUG_EVENT");
       LOAD_DLL_DEBUG_INFO info = debugEvent.u.LoadDll;
 
       TCHAR* buff = pData->dll[pData->nDll++];
-      GetFinalPathNameByHandle(info.hFile, buff, sizeof(pData->dll[0]) / sizeof(pData->dll[0][0]), FILE_NAME_NORMALIZED);
-      OXILog("\'%ls\'\n", buff);
-      OutputDebugString(_TEXT("DLL LOADED!!!!\n"));
+      GetFinalPathNameByHandle(info.hFile, buff, OXIARRSZ(pData->dll[0]), FILE_NAME_NORMALIZED);
     } break;
     case OUTPUT_DEBUG_STRING_EVENT: {
-      OXILog("OUTPUT_DEBUG_STRING_EVENT: ");
+      pData->reason = _TEXT("OUTPUT_DEBUG_STRING_EVENT");
       OUTPUT_DEBUG_STRING_INFO info = debugEvent.u.DebugString;
       void *buff = malloc(info.nDebugStringLength);
       memset(buff, 0, info.nDebugStringLength);
@@ -121,14 +119,13 @@ void dbgThread(void *param) {
       free(buff);
     } break;
     case RIP_EVENT: {
-      OXILog("RIP_EVENT\n");
+      pData->reason = _TEXT("RIP_EVENT");
     } break;
     case UNLOAD_DLL_DEBUG_EVENT: {
-      OXILog("UNLOAD_DLL_DEBUG_EVENT\n");
+      pData->reason = _TEXT("UNLOAD_DLL_DEBUG_EVENT");
     } break;
     case EXIT_PROCESS_DEBUG_EVENT: {
-      OXILog("EXIT_PROCESS_DEBUG_EVENT\n");
-      exit(0);
+      pData->reason = _TEXT("EXIT_PROCESS_DEBUG_EVENT");
     } break;
     }
 
@@ -137,7 +134,6 @@ void dbgThread(void *param) {
     OXIAssert(hThread);
     CONTEXT threadCtx = {.ContextFlags = CONTEXT_ALL};
     OXIAssert(GetThreadContext(hThread, &threadCtx));
-    OXILog("rip: %llx\n", threadCtx.Rip);
 
     // registers -> ui
     pData->ctx = threadCtx;
@@ -146,8 +142,8 @@ void dbgThread(void *param) {
     OXIAssert(ReadProcessMemory(
       processInformation.hProcess,
       (void*)threadCtx.Rip,
-      pData->instructions,
-      sizeof(pData->instructions),
+      pData->itext,
+      sizeof(pData->itext),
       0
     ));
 

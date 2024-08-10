@@ -24,7 +24,10 @@ typedef struct UIData {
   TCHAR dll[64][256];
   u32 nDll;
 
-  u8 instructions[15];
+  // binary instructions frame
+  u8 itext[256];
+
+  TCHAR* reason;
 } UIData;
 
 #ifdef __cplusplus

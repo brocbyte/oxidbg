@@ -4,3 +4,4 @@ build_oxitest/
 *.ini
 *.log
 xed/install/
+tags

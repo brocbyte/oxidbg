@@ -10,6 +10,7 @@ extern FILE *logFile;
   do {                                                                                             \
     if (logFile) { \
       fprintf(logFile, __VA_ARGS__);                                                                 \
+      fflush(logFile);\
     } \
   } while (false)
 
@@ -34,3 +35,6 @@ typedef int64_t i64;
 typedef i32 b32;
 typedef float f32;
 typedef double f64;
+
+#define OXIMIN(a, b) (((a) > (b)) ? (b) : (a))
+#define OXIARRSZ(a) (sizeof(a) / sizeof(a[0]))
