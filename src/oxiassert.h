@@ -6,20 +6,20 @@
 
 extern FILE *logFile;
 
-#define OXILog(...)                                                                                \
-  do {                                                                                             \
-    if (logFile) { \
-      fprintf(logFile, __VA_ARGS__);                                                                 \
-      fflush(logFile);\
-    } \
+#define OXILog(...)                                                            \
+  do {                                                                         \
+    if (logFile) {                                                             \
+      fprintf(logFile, __VA_ARGS__);                                           \
+      fflush(logFile);                                                         \
+    }                                                                          \
   } while (false)
 
-#define OXIAssertT(exp, ...)                                                                       \
-  do {                                                                                             \
-    if (!(exp)) {                                                                                  \
-      OXILog(__VA_ARGS__);                                                                         \
-      exit(-1);                                                                                    \
-    }                                                                                              \
+#define OXIAssertT(exp, ...)                                                   \
+  do {                                                                         \
+    if (!(exp)) {                                                              \
+      OXILog(__VA_ARGS__);                                                     \
+      exit(-1);                                                                \
+    }                                                                          \
   } while (false)
 
 #define OXIAssert(exp) OXIAssertT(exp, "%s:%d", __FILE__, __LINE__)
@@ -36,5 +36,3 @@ typedef i32 b32;
 typedef float f32;
 typedef double f64;
 
-#define OXIMIN(a, b) (((a) > (b)) ? (b) : (a))
-#define OXIARRSZ(a) (sizeof(a) / sizeof(a[0]))
