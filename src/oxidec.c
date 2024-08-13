@@ -36,7 +36,7 @@ static sourceMe(u64 addr, char *out, u64 szOut, OXIPEMODULE *dll, u32 nDll) {
       u64 candidate = dll[i].aSymbols[j].addr;
       if (candidate <= addr && (addr - candidate < mdiff)) {
         mdiff = addr - candidate;
-        snprintf(out, szOut, "%ls!%s+%lld", dll[i].dllName,
+        snprintf(out, szOut, "%ls!%s+%#llx", dll[i].dllName,
                  dll[i].aSymbols[j].name, mdiff);
       }
     }

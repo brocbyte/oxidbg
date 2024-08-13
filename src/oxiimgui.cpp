@@ -72,7 +72,6 @@ void OXIImGuiInit(HWND hwnd, ID3D12Device *device, int num_frames_in_flight,
       ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
   io.ConfigFlags |=
       ImGuiConfigFlags_NavEnableGamepad; // Enable Gamepad Controls
-
   // Setup Platform/Renderer backends
   ImGui_ImplWin32_Init(hwnd);
   ImGui_ImplDX12_Init(
@@ -80,6 +79,12 @@ void OXIImGuiInit(HWND hwnd, ID3D12Device *device, int num_frames_in_flight,
       // You'll need to designate a descriptor from your descriptor heap for
       // Dear ImGui to use internally for its font texture's SRV
       font_srv_cpu_desc_handle, font_srv_gpu_desc_handle);
+
+  ImFont *font = io.Fonts->AddFontFromFileTTF("fonts\\AcPlus_IBM_EGA_9x8.ttf", 14);
+  ImGuiStyle &style = ImGui::GetStyle();
+
+  style.Colors[ImGuiCol_Text] = ImVec4(1.0f, 1.0f, 1.0f, 1.00f);
+  style.Colors[ImGuiCol_WindowBg] = ImVec4(0.0f, 0.0f, 0.0f, 1.00f);
 }
 
 static void tableRegisterHelper(const char *regName, i64 regValue) {
@@ -99,9 +104,8 @@ void OXIImGuiBegFrame(UIData *data) {
   ImGui::Text("%ls", data->reason);
   EnterCriticalSection(&data->critical_section);
 
-  ImGui::BeginChild("Registers", ImVec2(300, 310), ImGuiChildFlags_Border,
-                    ImGuiWindowFlags_None);
-  if (ImGui::BeginTable("Registers", 2, ImGuiTableFlags_Borders)) {
+  if (ImGui::BeginTable("Registers", 2, ImGuiTableFlags_Borders,
+                        ImVec2(400, 310))) {
     tableRegisterHelper("eip", data->ctx.Rip);
     tableRegisterHelper("eax", data->ctx.Rax);
     tableRegisterHelper("ecx", data->ctx.Rcx);
@@ -121,14 +125,12 @@ void OXIImGuiBegFrame(UIData *data) {
     tableRegisterHelper("r15", data->ctx.R15);
     ImGui::EndTable();
   }
-  ImGui::EndChild();
 
   ImGui::SameLine();
   ImGui::BeginGroup();
   ImGui::Text("Modules");
   for (u32 i = 0; i < data->nDll; ++i) {
-    ImGui::Text("%ls %x", data->dll[i].dllName,
-                data->dll[i].ntHeader.Signature);
+    ImGui::Text("%ls", data->dll[i].dllName);
   }
   ImGui::EndGroup();
 
@@ -136,20 +138,22 @@ void OXIImGuiBegFrame(UIData *data) {
   decodeInstruction(data->itext, sizeof(data->itext), lines, _countof(lines),
                     data->ctx.Rip, data->dll, data->nDll);
 
-  ImGui::BeginChild("Disassembly", ImVec2(0, 400), ImGuiChildFlags_Border,
-                    ImGuiWindowFlags_None);
+  ImGui::BeginChild("DisassemblyAndControls", ImVec2(0, 300),
+                    ImGuiChildFlags_Border, ImGuiWindowFlags_None);
   {
-    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 5.0f);
-    ImGui::BeginChild("ChildR", ImVec2(0, 300), ImGuiChildFlags_Border,
+    ImGui::BeginChild("Disassembly", ImVec2(0, 200), ImGuiChildFlags_None,
                       ImGuiWindowFlags_None);
 
     for (int i = 0; i < _countof(lines); ++i) {
-      ImGui::Text("%s %p % 30s %s", strrchr(lines[i].source, '\\'),
-                  lines[i].addr, lines[i].itext, lines[i].decoded);
+      char *truncatedSource = strrchr(lines[i].source, '\\');
+      if (!truncatedSource)
+        truncatedSource = "nil";
+      else
+        ++truncatedSource;
+      ImGui::Text("% 50s %p % 20s %s", truncatedSource, lines[i].addr,
+                  lines[i].itext, lines[i].decoded);
     }
-
     ImGui::EndChild();
-    ImGui::PopStyleVar();
 
     if (ImGui::Button("Step Into")) {
       while (data->commandEntered != OXIDbgCommand_None) {

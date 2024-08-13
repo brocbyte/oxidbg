@@ -274,11 +274,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
   xed_tables_init();
 
-  WNDCLASSEXW wc = {sizeof(wc),         CS_CLASSDC, WndProc, 0L, 0L,
+  WNDCLASSEX wc = {sizeof(wc),         CS_CLASSDC, WndProc, 0L, 0L,
                     GetModuleHandle(0), 0,          0,       0,  0,
-                    L"ImGui Example",   0};
-  RegisterClassExW(&wc);
-  HWND hwnd = CreateWindowW(wc.lpszClassName, L"Dear ImGui DirectX12 Example",
+                    _TEXT("oxidbgclass"),   0};
+  RegisterClassEx(&wc);
+  HWND hwnd = CreateWindow(wc.lpszClassName, _TEXT("oxidbg"),
                             WS_OVERLAPPEDWINDOW, 100, 100, 1280, 800, 0, 0,
                             wc.hInstance, 0);
 
