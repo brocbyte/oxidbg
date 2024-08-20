@@ -36,6 +36,10 @@ typedef struct UIDataAsmLine {
   char source[128];
 } UIDataAsmLine;
 
+typedef struct OXIBreakpoint {
+  u64 addr;
+} OXIBreakpoint;
+
 typedef struct UIData {
   CONTEXT ctx;
   enum OXIDbgCommand commandEntered;
@@ -49,6 +53,14 @@ typedef struct UIData {
   u8 itext[256];
 
   TCHAR *reason;
+
+  // breakpoints
+  OXIBreakpoint breakpoints[16];
+  u32 nBreakpoints;
+
+  // log
+  char log[16][256];
+  u64 nLog;
 } UIData;
 
 #ifdef __cplusplus

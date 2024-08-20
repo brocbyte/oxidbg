@@ -3,6 +3,7 @@
 #include <stdbool.h>
 
 #include <stdio.h>
+#include <stdarg.h>
 
 extern FILE *logFile;
 
@@ -35,4 +36,23 @@ typedef int64_t i64;
 typedef i32 b32;
 typedef float f32;
 typedef double f64;
+
+inline bool OXIsnprintf(char *buf, u32 szbuf, u32 *pszWrittenNonNull,
+                        const char *fmt, ...) {
+  u32 szWrittenNonNull = *pszWrittenNonNull;
+  if (szWrittenNonNull + 1 < szbuf) {
+    va_list ap;
+    va_start(ap, fmt);
+    int res =
+        vsnprintf(buf + szWrittenNonNull, szbuf - szWrittenNonNull, fmt, ap);
+    va_end(ap);
+    if (res <= 0 || res > (i32)(szbuf - szWrittenNonNull - 1)) {
+      *pszWrittenNonNull = szbuf - 1;
+      return false;
+    }
+    *pszWrittenNonNull += res;
+    return true;
+  }
+  return false;
+}
 

@@ -4,31 +4,8 @@
 
 #include <stdio.h>
 #include <windows.h>
-#include <stdarg.h>
 
-#define TBUFSZ 90
-
-bool OXIsnprintf(char *buf, u32 szbuf, u32 *pszWrittenNonNull, const char *fmt,
-                 ...) {
-  u32 szWrittenNonNull = *pszWrittenNonNull;
-  OXIAssert(szWrittenNonNull + 1 <= szbuf);
-  if (szWrittenNonNull + 1 < szbuf) {
-    va_list ap;
-    va_start(ap, fmt);
-    int res =
-        vsnprintf(buf + szWrittenNonNull, szbuf - szWrittenNonNull, fmt, ap);
-    va_end(ap);
-    if (res <= 0 || res > (i32)(szbuf - szWrittenNonNull - 1)) {
-      *pszWrittenNonNull = szbuf - 1;
-      return false;
-    }
-    *pszWrittenNonNull += res;
-    return true;
-  }
-  return false;
-}
-
-static sourceMe(u64 addr, char *out, u64 szOut, OXIPEMODULE *dll, u32 nDll) {
+void sourceMe(u64 addr, char *out, u64 szOut, OXIPEMODULE *dll, u32 nDll) {
   *out = 0;
   u64 mdiff = 1000000000LL;
   for (u32 i = 0; i < nDll; ++i) {
@@ -36,8 +13,13 @@ static sourceMe(u64 addr, char *out, u64 szOut, OXIPEMODULE *dll, u32 nDll) {
       u64 candidate = dll[i].aSymbols[j].addr;
       if (candidate <= addr && (addr - candidate < mdiff)) {
         mdiff = addr - candidate;
-        snprintf(out, szOut, "%ls!%s+%#llx", dll[i].dllName,
-                 dll[i].aSymbols[j].name, mdiff);
+        if (mdiff) {
+          snprintf(out, szOut, "%ls!%s+%#llx", dll[i].dllName,
+                   dll[i].aSymbols[j].name, mdiff);
+        } else {
+          snprintf(out, szOut, "%ls!%s", dll[i].dllName,
+                   dll[i].aSymbols[j].name);
+        }
       }
     }
   }

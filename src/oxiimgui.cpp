@@ -80,11 +80,14 @@ void OXIImGuiInit(HWND hwnd, ID3D12Device *device, int num_frames_in_flight,
       // Dear ImGui to use internally for its font texture's SRV
       font_srv_cpu_desc_handle, font_srv_gpu_desc_handle);
 
-  ImFont *font = io.Fonts->AddFontFromFileTTF("fonts\\AcPlus_IBM_EGA_9x8.ttf", 14);
+  ImFont *font =
+      io.Fonts->AddFontFromFileTTF("fonts\\AcPlus_IBM_EGA_9x8.ttf", 13);
+
   ImGuiStyle &style = ImGui::GetStyle();
 
   style.Colors[ImGuiCol_Text] = ImVec4(1.0f, 1.0f, 1.0f, 1.00f);
   style.Colors[ImGuiCol_WindowBg] = ImVec4(0.0f, 0.0f, 0.0f, 1.00f);
+  style.Colors[ImGuiCol_Button] = (ImVec4)ImColor(29, 68, 108);
 }
 
 static void tableRegisterHelper(const char *regName, i64 regValue) {
@@ -95,46 +98,137 @@ static void tableRegisterHelper(const char *regName, i64 regValue) {
   ImGui::Text("%p", regValue);
 }
 
+static i16 findBreakpoint(u64 addr, OXIBreakpoint *breakpoints,
+                          u32 nBreakpoints) {
+  i16 breakpointIdx = -1;
+  for (int j = 0; j < nBreakpoints; ++j) {
+    if (breakpoints[j].addr == addr) {
+      breakpointIdx = j;
+    }
+  }
+  return breakpointIdx;
+}
+
+static void breakpointHelper(u32 i, u64 addr, OXIBreakpoint *breakpoints,
+                             u32 *nBreakpoints, u32 countOfBreakpoints) {
+  ImGui::PushID(i);
+  i16 breakpointIdx = findBreakpoint(addr, breakpoints, *nBreakpoints);
+  ImVec4 ayanamiBlue = (ImVec4)ImColor(132, 141, 184);
+
+  ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32_BLACK_TRANS);
+  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32_BLACK_TRANS);
+  ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32_BLACK_TRANS);
+  ImGui::PushStyleColor(ImGuiCol_Text, ayanamiBlue);
+
+  bool hasBreakpoint = breakpointIdx != -1;
+  if (hasBreakpoint) {
+    if (ImGui::Button("[*]")) {
+      for (int j = breakpointIdx + 1; j < *nBreakpoints; ++j) {
+        breakpoints[j - 1] = breakpoints[j];
+      }
+      --(*nBreakpoints);
+    }
+  } else {
+    if (ImGui::Button("[ ]")) {
+      if (*nBreakpoints != countOfBreakpoints) {
+        breakpoints[*nBreakpoints].addr = addr;
+        ++(*nBreakpoints);
+      }
+    }
+  }
+
+  ImGui::PopStyleColor(4);
+  ImGui::PopID();
+}
+
 void OXIImGuiBegFrame(UIData *data) {
   ImGui_ImplDX12_NewFrame();
   ImGui_ImplWin32_NewFrame();
   ImGui::NewFrame();
+  ImGui::ShowDemoWindow();
   ImGui::Begin("Debug");
 
   ImGui::Text("%ls", data->reason);
   EnterCriticalSection(&data->critical_section);
 
-  if (ImGui::BeginTable("Registers", 2, ImGuiTableFlags_Borders,
-                        ImVec2(400, 310))) {
-    tableRegisterHelper("eip", data->ctx.Rip);
-    tableRegisterHelper("eax", data->ctx.Rax);
-    tableRegisterHelper("ecx", data->ctx.Rcx);
-    tableRegisterHelper("edx", data->ctx.Rdx);
-    tableRegisterHelper("ebx", data->ctx.Rbx);
-    tableRegisterHelper("esp", data->ctx.Rsp);
-    tableRegisterHelper("ebp", data->ctx.Rbp);
-    tableRegisterHelper("esi", data->ctx.Rsi);
-    tableRegisterHelper("edi", data->ctx.Rdi);
-    tableRegisterHelper("r8", data->ctx.R8);
-    tableRegisterHelper("r9", data->ctx.R9);
-    tableRegisterHelper("r10", data->ctx.R10);
-    tableRegisterHelper("r11", data->ctx.R11);
-    tableRegisterHelper("r12", data->ctx.R12);
-    tableRegisterHelper("r13", data->ctx.R13);
-    tableRegisterHelper("r14", data->ctx.R14);
-    tableRegisterHelper("r15", data->ctx.R15);
-    ImGui::EndTable();
-  }
+  ImGui::SetNextWindowSizeConstraints(
+      ImVec2(0.0f, ImGui::GetTextLineHeightWithSpacing() * 1),
+      ImVec2(FLT_MAX, ImGui::GetTextLineHeightWithSpacing() * 22));
+  if (ImGui::BeginChild("RegistersChild", ImVec2(0.0f, 0.0f),
+                        ImGuiChildFlags_AutoResizeX |
+                            ImGuiChildFlags_AutoResizeY)) {
 
+    static ImGuiTableFlags flags = ImGuiTableFlags_SizingFixedFit |
+                                   ImGuiTableFlags_Resizable |
+                                   ImGuiTableFlags_Borders;
+
+    if (ImGui::BeginTable("Registers", 2, flags)) {
+      tableRegisterHelper("eip", data->ctx.Rip);
+      tableRegisterHelper("eax", data->ctx.Rax);
+      tableRegisterHelper("ecx", data->ctx.Rcx);
+      tableRegisterHelper("edx", data->ctx.Rdx);
+      tableRegisterHelper("ebx", data->ctx.Rbx);
+      tableRegisterHelper("esp", data->ctx.Rsp);
+      tableRegisterHelper("ebp", data->ctx.Rbp);
+      tableRegisterHelper("esi", data->ctx.Rsi);
+      tableRegisterHelper("edi", data->ctx.Rdi);
+      tableRegisterHelper("r8", data->ctx.R8);
+      tableRegisterHelper("r9", data->ctx.R9);
+      tableRegisterHelper("r10", data->ctx.R10);
+      tableRegisterHelper("r11", data->ctx.R11);
+      tableRegisterHelper("r12", data->ctx.R12);
+      tableRegisterHelper("r13", data->ctx.R13);
+      tableRegisterHelper("r14", data->ctx.R14);
+      tableRegisterHelper("r15", data->ctx.R15);
+      ImGui::EndTable();
+    }
+    ImGui::EndChild();
+  }
   ImGui::SameLine();
   ImGui::BeginGroup();
-  ImGui::Text("Modules");
-  for (u32 i = 0; i < data->nDll; ++i) {
-    ImGui::Text("%ls", data->dll[i].dllName);
+  if (ImGui::BeginChild("ModulesChild", ImVec2(0.0f, 200.0f),
+                        ImGuiChildFlags_AutoResizeX)) {
+    ImGui::Text("Modules");
+    ImGui::SameLine();
+    static ImGuiTextFilter filter;
+    filter.Draw();
+    for (u32 i = 0; i < data->nDll; ++i) {
+      char nodeDllName[256];
+      snprintf(nodeDllName, sizeof(nodeDllName), "%ls", data->dll[i].dllName);
+      if (ImGui::TreeNode(nodeDllName)) {
+
+        for (u32 j = 0; j < data->dll[i].nSymbols; ++j) {
+          if (filter.PassFilter(data->dll[i].aSymbols[j].name)) {
+            breakpointHelper(j, data->dll[i].aSymbols[j].addr,
+                             data->breakpoints, &data->nBreakpoints,
+                             _countof(data->breakpoints));
+            ImGui::SameLine();
+            ImGui::Text(data->dll[i].aSymbols[j].name);
+          }
+        }
+
+        ImGui::TreePop();
+        ImGui::Spacing();
+      }
+    }
+    ImGui::EndChild();
+  }
+
+  ImGui::Text("Log");
+  ImGui::SameLine();
+  if (ImGui::Button("Clear")) {
+    data->nLog = 0;
+  }
+  if (ImGui::BeginChild("log", ImVec2(0.0f, 150.0f),
+                        ImGuiChildFlags_AutoResizeX)) {
+    for (int i = 0; i < data->nLog; ++i) {
+      ImGui::Text(data->log[i]);
+    }
+    ImGui::EndChild();
   }
   ImGui::EndGroup();
 
-  UIDataAsmLine lines[10];
+  UIDataAsmLine lines[8];
   decodeInstruction(data->itext, sizeof(data->itext), lines, _countof(lines),
                     data->ctx.Rip, data->dll, data->nDll);
 
@@ -145,13 +239,37 @@ void OXIImGuiBegFrame(UIData *data) {
                       ImGuiWindowFlags_None);
 
     for (int i = 0; i < _countof(lines); ++i) {
+
       char *truncatedSource = strrchr(lines[i].source, '\\');
-      if (!truncatedSource)
+      if (!truncatedSource) {
         truncatedSource = "nil";
-      else
+      } else {
         ++truncatedSource;
-      ImGui::Text("% 50s %p % 20s %s", truncatedSource, lines[i].addr,
-                  lines[i].itext, lines[i].decoded);
+      }
+
+      breakpointHelper(i, lines[i].addr, data->breakpoints, &data->nBreakpoints,
+                       _countof(data->breakpoints));
+
+      ImGui::SameLine();
+
+      char line[256];
+      snprintf(line, sizeof(line), "%p % 50s % 20s %s", (void *)lines[i].addr,
+               truncatedSource, lines[i].itext, lines[i].decoded);
+
+      if (lines[i].addr == data->ctx.Rip) {
+        ImDrawList *draw_list = ImGui::GetWindowDrawList();
+        ImVec2 textSize = ImGui::CalcTextSize(line, line + strlen(line) - 1);
+        ImVec2 framePadding = ImGui::GetStyle().FramePadding;
+        ImVec2 gradient_size = {textSize.x + framePadding.x * 2.0f,
+                                textSize.y + framePadding.y * 2.0f};
+
+        ImVec2 p0 = ImGui::GetCursorScreenPos();
+        ImVec2 p1 = ImVec2(p0.x + gradient_size.x, p0.y + gradient_size.y);
+        ImU32 col_a = ImGui::GetColorU32(IM_COL32(29, 68, 108, 255));
+        draw_list->AddRectFilled(p0, p1, col_a);
+      }
+
+      ImGui::Text(line);
     }
     ImGui::EndChild();
 
@@ -172,6 +290,29 @@ void OXIImGuiBegFrame(UIData *data) {
     }
   }
   ImGui::EndChild();
+
+  static char breakpoint[256] = {0};
+  if (ImGui::Button("Add breakpoint")) {
+    ImGui::OpenPopup("breakpoint_popup");
+  }
+  if (ImGui::BeginPopup("breakpoint_popup")) {
+    ImGui::InputText("Address/Name", breakpoint, IM_ARRAYSIZE(breakpoint));
+    if (ImGui::Button("OK")) {
+      long long parsed = atoll(breakpoint);
+      if (parsed) {
+        data->breakpoints[data->nBreakpoints].addr = parsed;
+        ++data->nBreakpoints;
+      }
+    }
+    ImGui::EndPopup();
+  }
+
+  for (int i = 0; i < data->nBreakpoints; ++i) {
+    char source[256];
+    sourceMe(data->breakpoints[i].addr, source, sizeof(source), data->dll,
+             data->nDll);
+    ImGui::Text("[%d] %p %s", i, data->breakpoints[i].addr, source);
+  }
 
   ImGui::End();
 

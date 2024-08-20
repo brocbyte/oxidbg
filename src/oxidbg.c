@@ -83,6 +83,12 @@ void dbgThread(void *param) {
 
     DWORD continueStatus = DBG_EXCEPTION_NOT_HANDLED;
 
+    HANDLE hThread = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT, FALSE,
+                                debugEvent.dwThreadId);
+    OXIAssert(hThread);
+    CONTEXT threadCtx = {.ContextFlags = CONTEXT_ALL};
+    OXIAssert(GetThreadContext(hThread, &threadCtx));
+
     switch (debugEvent.dwDebugEventCode) {
     case CREATE_PROCESS_DEBUG_EVENT: {
       pData->reason = _TEXT("CREATE_PROCESS_DEBUG_EVENT");
@@ -95,6 +101,24 @@ void dbgThread(void *param) {
       if (debugEvent.u.Exception.ExceptionRecord.ExceptionCode ==
           EXCEPTION_SINGLE_STEP) {
         continueStatus = DBG_CONTINUE;
+      }
+
+      // check if it was debug execption ('fault')
+      u32 breakPointConditionDetected[4] = {(1 << 0), (1 << 1), (1 << 2),
+                                            (1 << 3)};
+      i32 breakpointHit = -1;
+      for (int i = 0; i < 4; ++i) {
+        if (threadCtx.Dr6 & breakPointConditionDetected[i]) {
+          breakpointHit = i;
+        }
+      }
+      if (breakpointHit != -1) {
+        threadCtx.EFlags |= (1 << 16);
+        continueStatus = DBG_CONTINUE;
+        if (pData->nLog < _countof(pData->log)) {
+        snprintf(pData->log[pData->nLog++], sizeof(pData->log[0]),
+                 "Breakpoint %d hit\n", breakpointHit);
+        }
       }
     } break;
     case EXIT_THREAD_DEBUG_EVENT: {
@@ -145,8 +169,10 @@ void dbgThread(void *param) {
       OXIAssert(ReadProcessMemory(process.hProcess, pDebugProcessDLLName,
                                   exportDirectoryDLLName,
                                   sizeof(exportDirectoryDLLName), 0));
-      OXILog("exportDirectoryDLLName: %s %p\n", exportDirectoryDLLName,
-             info.lpBaseOfDll);
+      if (pData->nLog < _countof(pData->log)) {
+        snprintf(pData->log[pData->nLog++], sizeof(pData->log[0]),
+                 "Loaded %s %p\n", exportDirectoryDLLName, info.lpBaseOfDll);
+      }
 
       void *pDebugProcessExportAddresses =
           adv(info.lpBaseOfDll, exportDirectory.AddressOfFunctions);
@@ -205,18 +231,28 @@ void dbgThread(void *param) {
 
     } break;
     case OUTPUT_DEBUG_STRING_EVENT: {
+      continueStatus = DBG_CONTINUE; // todo checkout...
       pData->reason = _TEXT("OUTPUT_DEBUG_STRING_EVENT");
       OUTPUT_DEBUG_STRING_INFO info = debugEvent.u.DebugString;
       void *buff = malloc(info.nDebugStringLength);
       memset(buff, 0, info.nDebugStringLength);
       OXIAssert(ReadProcessMemory(process.hProcess, info.lpDebugStringData,
                                   buff, info.nDebugStringLength, 0));
+
       if (info.fUnicode) {
         if (*(wchar_t *)buff) {
           OXILog("\'%ls\'\n", (wchar_t *)buff);
+          if (pData->nLog < _countof(pData->log)) {
+            snprintf(pData->log[pData->nLog++], sizeof(pData->log[0]), 
+                        "DebugMessage: \'%ls\'\n", (wchar_t *)buff);
+          }
         }
       } else {
         OXILog("\'%s\'\n", (char *)buff);
+        if (pData->nLog < _countof(pData->log)) {
+          snprintf(pData->log[pData->nLog++], sizeof(pData->log[0]), 
+                      "DebugMessage: \'%s\'\n", (char *)buff);
+        }
       }
       free(buff);
     } break;
@@ -230,12 +266,6 @@ void dbgThread(void *param) {
       pData->reason = _TEXT("EXIT_PROCESS_DEBUG_EVENT");
     } break;
     }
-
-    HANDLE hThread = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT, FALSE,
-                                debugEvent.dwThreadId);
-    OXIAssert(hThread);
-    CONTEXT threadCtx = {.ContextFlags = CONTEXT_ALL};
-    OXIAssert(GetThreadContext(hThread, &threadCtx));
 
     // registers -> ui
     pData->ctx = threadCtx;
@@ -259,6 +289,37 @@ void dbgThread(void *param) {
     if (command == OXIDbgCommand_StepInto) {
       threadCtx.EFlags |= 1 << 8;
     }
+
+    // apply breakpoints
+    u32 localEnable[4] = {(1 << 0), (1 << 2), (1 << 4), (1 << 6)};
+    u32 len[4] = {(0b11 << 18), (0b11 << 22), (0b11 << 26), (0b11 << 30)};
+    u32 rw[4] = {(0b11 << 16), (0b11 << 20), (0b11 << 24), (0b11 << 28)};
+    for (int i = 0; i < 4; ++i) {
+      if (i < pData->nBreakpoints) {
+        // enable breakpoint -> 1
+        threadCtx.Dr7 |= localEnable[i];
+        // length -> 00 (single byte)
+        threadCtx.Dr7 &= ~len[i];
+        // rw condition -> 00 (execution only)
+        threadCtx.Dr7 &= ~rw[i];
+      } else {
+        // disable i-th breakpoint
+        threadCtx.Dr7 &= ~localEnable[i];
+      }
+    }
+    if (0 < pData->nBreakpoints) {
+      threadCtx.Dr0 = pData->breakpoints[0].addr;
+    }
+    if (1 < pData->nBreakpoints) {
+      threadCtx.Dr1 = pData->breakpoints[1].addr;
+    }
+    if (2 < pData->nBreakpoints) {
+      threadCtx.Dr2 = pData->breakpoints[2].addr;
+    }
+    if (3 < pData->nBreakpoints) {
+      threadCtx.Dr3 = pData->breakpoints[3].addr;
+    }
+
     OXIAssert(SetThreadContext(hThread, &threadCtx));
 
     ContinueDebugEvent(debugEvent.dwProcessId, debugEvent.dwThreadId,
@@ -268,19 +329,22 @@ void dbgThread(void *param) {
   _endthread();
 }
 
+// do not break the stack bro...
+UIData uiData = {0};
+
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                     PWSTR pCmdLine, int nCmdShow) {
   OXIAssert(!_tfopen_s(&logFile, _TEXT("last_run.log"), _TEXT("w")));
 
   xed_tables_init();
 
-  WNDCLASSEX wc = {sizeof(wc),         CS_CLASSDC, WndProc, 0L, 0L,
-                    GetModuleHandle(0), 0,          0,       0,  0,
-                    _TEXT("oxidbgclass"),   0};
+  WNDCLASSEX wc = {sizeof(wc),           CS_CLASSDC, WndProc, 0L, 0L,
+                   GetModuleHandle(0),   0,          0,       0,  0,
+                   _TEXT("oxidbgclass"), 0};
   RegisterClassEx(&wc);
-  HWND hwnd = CreateWindow(wc.lpszClassName, _TEXT("oxidbg"),
-                            WS_OVERLAPPEDWINDOW, 100, 100, 1280, 800, 0, 0,
-                            wc.hInstance, 0);
+  HWND hwnd =
+      CreateWindow(wc.lpszClassName, _TEXT("oxidbg"), WS_OVERLAPPEDWINDOW, 100,
+                   100, 1280, 800, 0, 0, wc.hInstance, 0);
 
   // Initialize Direct3D
   if (!CreateDeviceD3D(hwnd)) {
@@ -301,7 +365,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
   OXIImGuiInit(hwnd, g_pd3dDevice, NUM_FRAMES_IN_FLIGHT,
                DXGI_FORMAT_R8G8B8A8_UNORM, g_pd3dSrvDescHeap, h1, h2);
 
-  UIData uiData = {0};
   InitializeConditionVariable(&uiData.condition_variable);
   InitializeCriticalSection(&uiData.critical_section);
 
