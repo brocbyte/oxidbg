@@ -1,3 +1,4 @@
+@echo off
 cl
 if not %errorlevel%==0 (
 call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat" x64
@@ -16,16 +17,16 @@ if not exist build_oxidbg mkdir build_oxidbg
 set unicode=/D UNICODE /D _UNICODE
 
 pushd build_oxitest
-clang -target x86_64-pc-windows-msvc -DUNICODE -D_UNICODE %src%oxitest.c -ooxitest.exe
+cl %unicode% /MD %src%oxitest.c
 popd
 
-set imgui_headers=/I ..\imgui /I ..\imgui\backends 
+set imgui_headers=/I ..\imgui /I ..\imgui\backends
 set imgui_src=..\imgui\backends\imgui_impl_dx12.cpp ..\imgui\backends\imgui_impl_win32.cpp ..\imgui\imgui*.cpp
 
 set xed_headers=/I ..\xed\install\include
 
 set headers=%imgui_headers% %xed_headers%
-set libs=xed.lib user32.lib D3D12.lib DXGI.lib 
+set libs=xed.lib user32.lib D3D12.lib DXGI.lib
 
 set link=/LIBPATH:..\xed\install\lib
 

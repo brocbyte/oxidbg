@@ -22,11 +22,19 @@ typedef struct OXISymbol {
 } OXISymbol;
 
 typedef struct OXIPEMODULE {
-  TCHAR dllName[256];
-  IMAGE_DOS_HEADER dosHeader;
+  void *base;
   IMAGE_NT_HEADERS ntHeader;
-  OXISymbol* aSymbols;
+
+  TCHAR moduleNameByHandle[256];
+
+  // IMAGE_DIRECTORY_ENTRY_EXPORT
+  char exportDirectoryDLLName[128]; // couldn't find size for this :(
+  OXISymbol *aSymbols;
   u32 nSymbols;
+
+  // IMAGE_DIRECTORY_ENTRY_EXCEPTION
+  RUNTIME_FUNCTION functions[4096 * 2];
+  u32 nFunctions;
 } OXIPEMODULE;
 
 typedef struct UIDataAsmLine {
@@ -34,6 +42,8 @@ typedef struct UIDataAsmLine {
   u8 itext[15];
   char decoded[64];
   char source[128];
+  bool functionBeg;
+  bool functionEnd;
 } UIDataAsmLine;
 
 typedef struct OXIBreakpoint {
@@ -41,6 +51,7 @@ typedef struct OXIBreakpoint {
 } OXIBreakpoint;
 
 typedef struct UIData {
+  HANDLE process;
   CONTEXT ctx;
   enum OXIDbgCommand commandEntered;
   CONDITION_VARIABLE condition_variable;
@@ -52,7 +63,7 @@ typedef struct UIData {
   // binary instructions frame
   u8 itext[256];
 
-  TCHAR *reason;
+  char reason[64];
 
   // breakpoints
   OXIBreakpoint breakpoints[16];
@@ -61,6 +72,16 @@ typedef struct UIData {
   // log
   char log[16][256];
   u64 nLog;
+
+  // threads
+  CREATE_THREAD_DEBUG_INFO threads[8];
+  i32 nThreads;
+
+  DWORD issueThread;
+
+  // stack (must be per thread actually)
+  u64 callstack[16];
+  u32 nCallstack;
 } UIData;
 
 #ifdef __cplusplus

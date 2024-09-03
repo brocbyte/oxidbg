@@ -1,6 +1,7 @@
 #include <initguid.h>
 #include "oxiassert.h"
 #include "oxiimgui.h"
+#include "oxidec.h"
 
 #include <tchar.h>
 #include <wchar.h>
@@ -55,7 +56,107 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 FILE *logFile = 0;
 const TCHAR *whitespace = _TEXT(" \f\n\r\t\v");
 
-static void *adv(void *base, u64 rva) { return (void *)((char *)base + rva); }
+static void parsePE(OXIPEMODULE *module, HANDLE hProcess, HANDLE hFile,
+                    void *base) {
+  module->base = base;
+
+  GetFinalPathNameByHandle(hFile, module->moduleNameByHandle,
+                           _countof(module->moduleNameByHandle),
+                           FILE_NAME_NORMALIZED);
+
+  IMAGE_DOS_HEADER dosHeader;
+  void *pDebugProcessDOSHeader = base;
+  OXIAssert(ReadProcessMemory(hProcess, pDebugProcessDOSHeader, &dosHeader,
+                              sizeof(dosHeader), 0));
+
+  void *pDebugProcessNTHeader = adv(base, dosHeader.e_lfanew);
+  OXIAssert(ReadProcessMemory(hProcess, pDebugProcessNTHeader,
+                              &module->ntHeader, sizeof(module->ntHeader), 0));
+
+  IMAGE_OPTIONAL_HEADER64 *pOptionalHeader = &module->ntHeader.OptionalHeader;
+  OXIAssert(IMAGE_DIRECTORY_ENTRY_EXPORT <
+            pOptionalHeader->NumberOfRvaAndSizes);
+
+  // https://learn.microsoft.com/en-us/previous-versions/ms809762(v=msdn.10)?redirectedfrom=MSDN#IMAGE_EXPORT_DIRECTORY
+  IMAGE_DATA_DIRECTORY exportTable =
+      pOptionalHeader->DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+  IMAGE_EXPORT_DIRECTORY exportDirectory;
+  void *pDebugProcessExportDirectory = adv(base, exportTable.VirtualAddress);
+  OXIAssert(ReadProcessMemory(hProcess, pDebugProcessExportDirectory,
+                              &exportDirectory, sizeof(exportDirectory), 0));
+
+  void *pDebugProcessDLLName = adv(base, exportDirectory.Name);
+  OXIAssert(ReadProcessMemory(hProcess, pDebugProcessDLLName,
+                              module->exportDirectoryDLLName,
+                              sizeof(module->exportDirectoryDLLName), 0));
+
+  void *pDebugProcessExportAddresses =
+      adv(base, exportDirectory.AddressOfFunctions);
+  u64 szExportAddresses = sizeof(u32) * exportDirectory.NumberOfFunctions;
+  u32 *pExportAddresses = malloc(szExportAddresses);
+  OXIAssert(ReadProcessMemory(hProcess, pDebugProcessExportAddresses,
+                              pExportAddresses, szExportAddresses, 0));
+
+  void *pDebugProcessExportNames = adv(base, exportDirectory.AddressOfNames);
+  u64 szExportNames = sizeof(u32) * exportDirectory.NumberOfNames;
+  u32 *pExportNames = malloc(szExportNames);
+  OXIAssert(ReadProcessMemory(hProcess, pDebugProcessExportNames, pExportNames,
+                              szExportNames, 0));
+
+  void *pDebugProcessNameOrdinals =
+      adv(base, exportDirectory.AddressOfNameOrdinals);
+  u64 szNameOrdinals = sizeof(u16) * exportDirectory.NumberOfNames;
+  u16 *pNameOrdinals = malloc(szNameOrdinals);
+  OXIAssert(ReadProcessMemory(hProcess, pDebugProcessNameOrdinals,
+                              pNameOrdinals, szNameOrdinals, 0));
+
+  OXILog("nNames: %d, nFunctions: %d\n", exportDirectory.NumberOfNames,
+         exportDirectory.NumberOfFunctions);
+  module->nSymbols = exportDirectory.NumberOfFunctions;
+  module->aSymbols = malloc(sizeof(module->aSymbols[0]) * module->nSymbols);
+
+  for (u32 i = 0; i < module->nSymbols; ++i) {
+    module->aSymbols[i].addr = (u64)adv(base, pExportAddresses[i]);
+
+    u32 ordinal = exportDirectory.Base + i;
+
+    bool foundName = false;
+    char symname[sizeof(module->aSymbols[0].name)];
+
+    for (u32 j = 0; j < exportDirectory.NumberOfNames; ++j) {
+      if (pNameOrdinals[j] == i) {
+        void *pSymbolName = adv(base, pExportNames[j]);
+        OXIAssert(ReadProcessMemory(hProcess, pSymbolName, symname,
+                                    sizeof(symname), 0));
+        foundName = true;
+      }
+    }
+
+    if (foundName) {
+      snprintf(module->aSymbols[i].name, sizeof(module->aSymbols[i].name), "%s",
+               symname);
+    } else {
+      snprintf(module->aSymbols[i].name, sizeof(module->aSymbols[i].name),
+               "#%u", ordinal);
+    }
+    OXILog("%s %x\n", module->aSymbols[i].name, pExportAddresses[i]);
+  }
+
+  OXIAssert(IMAGE_DIRECTORY_ENTRY_EXCEPTION <
+            pOptionalHeader->NumberOfRvaAndSizes);
+
+  IMAGE_DATA_DIRECTORY exceptionTable =
+      pOptionalHeader->DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
+  void *pDebugProcessExceptionDirectory =
+      adv(base, exceptionTable.VirtualAddress);
+
+  OXIAssert(ReadProcessMemory(
+      hProcess, pDebugProcessExceptionDirectory, module->functions,
+      __min(sizeof(module->functions), exceptionTable.Size), 0));
+  OXIAssert(exceptionTable.Size % sizeof(module->functions[0]) == 0);
+  module->nFunctions = __min(exceptionTable.Size / sizeof(module->functions[0]),
+                             _countof(module->functions));
+}
 
 void dbgThread(void *param) {
   UIData *pData = (UIData *)param;
@@ -76,6 +177,8 @@ void dbgThread(void *param) {
                           DEBUG_ONLY_THIS_PROCESS | CREATE_NEW_CONSOLE, 0, 0,
                           &startupInfo, &process));
 
+  pData->process = process.hProcess;
+
   while (true) {
     DEBUG_EVENT debugEvent;
     OXIAssert(WaitForDebugEventEx(&debugEvent, INFINITE));
@@ -89,15 +192,32 @@ void dbgThread(void *param) {
     CONTEXT threadCtx = {.ContextFlags = CONTEXT_ALL};
     OXIAssert(GetThreadContext(hThread, &threadCtx));
 
+    char *reason = "";
     switch (debugEvent.dwDebugEventCode) {
     case CREATE_PROCESS_DEBUG_EVENT: {
-      pData->reason = _TEXT("CREATE_PROCESS_DEBUG_EVENT");
+      reason = "CREATE_PROCESS_DEBUG_EVENT";
+      CREATE_PROCESS_DEBUG_INFO createProcessInfo =
+          debugEvent.u.CreateProcessInfo;
+      if (pData->nThreads < _countof(pData->threads)) {
+        CREATE_THREAD_DEBUG_INFO *thread = &pData->threads[pData->nThreads++];
+        thread->hThread = createProcessInfo.hThread;
+        thread->lpThreadLocalBase = createProcessInfo.lpThreadLocalBase;
+        thread->lpStartAddress = createProcessInfo.lpStartAddress;
+      }
+      if (pData->nDll < _countof(pData->dll)) {
+        OXIPEMODULE *module = &pData->dll[pData->nDll++];
+        parsePE(module, process.hProcess, createProcessInfo.hFile,
+                createProcessInfo.lpBaseOfImage);
+      }
     } break;
     case CREATE_THREAD_DEBUG_EVENT: {
-      pData->reason = _TEXT("CREATE_THREAD_DEBUG_EVENT");
+      reason = "CREATE_THREAD_DEBUG_EVENT";
+      if (pData->nThreads < _countof(pData->threads)) {
+        pData->threads[pData->nThreads++] = debugEvent.u.CreateThread;
+      }
     } break;
     case EXCEPTION_DEBUG_EVENT: {
-      pData->reason = _TEXT("EXCEPTION_DEBUG_EVENT");
+      reason = "EXCEPTION_DEBUG_EVENT";
       if (debugEvent.u.Exception.ExceptionRecord.ExceptionCode ==
           EXCEPTION_SINGLE_STEP) {
         continueStatus = DBG_CONTINUE;
@@ -116,123 +236,33 @@ void dbgThread(void *param) {
         threadCtx.EFlags |= (1 << 16);
         continueStatus = DBG_CONTINUE;
         if (pData->nLog < _countof(pData->log)) {
-        snprintf(pData->log[pData->nLog++], sizeof(pData->log[0]),
-                 "Breakpoint %d hit\n", breakpointHit);
+          snprintf(pData->log[pData->nLog++], sizeof(pData->log[0]),
+                   "Breakpoint %d hit\n", breakpointHit);
         }
       }
     } break;
     case EXIT_THREAD_DEBUG_EVENT: {
-      pData->reason = _TEXT("EXIT_THREAD_DEBUG_EVENT");
+      reason = "EXIT_THREAD_DEBUG_EVENT";
     } break;
     case LOAD_DLL_DEBUG_EVENT: {
-      pData->reason = _TEXT("LOAD_DLL_DEBUG_EVENT");
-      LOAD_DLL_DEBUG_INFO info = debugEvent.u.LoadDll;
+      reason = "LOAD_DLL_DEBUG_EVENT";
+      LOAD_DLL_DEBUG_INFO loadDllInfo = debugEvent.u.LoadDll;
 
       if (pData->nDll == _countof(pData->dll)) {
         OXILog("Too many modules!\n");
         break;
       }
-      OXIPEMODULE *module = pData->dll + pData->nDll;
-      pData->nDll++;
-
-      GetFinalPathNameByHandle(info.hFile, module->dllName,
-                               _countof(module->dllName), FILE_NAME_NORMALIZED);
-
-      void *pDebugProcessDOSHeader = info.lpBaseOfDll;
-      OXIAssert(ReadProcessMemory(process.hProcess, pDebugProcessDOSHeader,
-                                  &module->dosHeader, sizeof(module->dosHeader),
-                                  0));
-
-      void *pDebugProcessNTHeader =
-          adv(info.lpBaseOfDll, module->dosHeader.e_lfanew);
-      OXIAssert(ReadProcessMemory(process.hProcess, pDebugProcessNTHeader,
-                                  &module->ntHeader, sizeof(module->ntHeader),
-                                  0));
-
-      IMAGE_OPTIONAL_HEADER64 *pOptionalHeader =
-          &module->ntHeader.OptionalHeader;
-      OXIAssert(IMAGE_DIRECTORY_ENTRY_EXPORT /* max used directory_entry */ <
-                pOptionalHeader->NumberOfRvaAndSizes);
-
-      // https://learn.microsoft.com/en-us/previous-versions/ms809762(v=msdn.10)?redirectedfrom=MSDN#IMAGE_EXPORT_DIRECTORY
-      IMAGE_DATA_DIRECTORY exportTable =
-          pOptionalHeader->DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
-      IMAGE_EXPORT_DIRECTORY exportDirectory;
-      void *pDebugProcessExportDirectoryBase =
-          adv(info.lpBaseOfDll, exportTable.VirtualAddress);
-      OXIAssert(
-          ReadProcessMemory(process.hProcess, pDebugProcessExportDirectoryBase,
-                            &exportDirectory, sizeof(exportDirectory), 0));
-
-      char exportDirectoryDLLName[128] = {0}; // couldn't find size for this :(
-      void *pDebugProcessDLLName = adv(info.lpBaseOfDll, exportDirectory.Name);
-      OXIAssert(ReadProcessMemory(process.hProcess, pDebugProcessDLLName,
-                                  exportDirectoryDLLName,
-                                  sizeof(exportDirectoryDLLName), 0));
+      OXIPEMODULE *module = &pData->dll[pData->nDll++];
+      parsePE(module, process.hProcess, loadDllInfo.hFile,
+              loadDllInfo.lpBaseOfDll);
       if (pData->nLog < _countof(pData->log)) {
-        snprintf(pData->log[pData->nLog++], sizeof(pData->log[0]),
-                 "Loaded %s %p\n", exportDirectoryDLLName, info.lpBaseOfDll);
+        snprintf(pData->log[pData->nLog++], sizeof(*pData->log),
+                 "Loaded %ls %p", module->moduleNameByHandle, module->base);
       }
-
-      void *pDebugProcessExportAddresses =
-          adv(info.lpBaseOfDll, exportDirectory.AddressOfFunctions);
-      u64 szExportAddresses = sizeof(u32) * exportDirectory.NumberOfFunctions;
-      u32 *pExportAddresses = malloc(szExportAddresses);
-      OXIAssert(ReadProcessMemory(process.hProcess,
-                                  pDebugProcessExportAddresses,
-                                  pExportAddresses, szExportAddresses, 0));
-
-      void *pDebugProcessExportNames =
-          adv(info.lpBaseOfDll, exportDirectory.AddressOfNames);
-      u64 szExportNames = sizeof(u32) * exportDirectory.NumberOfNames;
-      u32 *pExportNames = malloc(szExportNames);
-      OXIAssert(ReadProcessMemory(process.hProcess, pDebugProcessExportNames,
-                                  pExportNames, szExportNames, 0));
-
-      void *pDebugProcessNameOrdinals =
-          adv(info.lpBaseOfDll, exportDirectory.AddressOfNameOrdinals);
-      u64 szNameOrdinals = sizeof(u16) * exportDirectory.NumberOfNames;
-      u16 *pNameOrdinals = malloc(szNameOrdinals);
-      OXIAssert(ReadProcessMemory(process.hProcess, pDebugProcessNameOrdinals,
-                                  pNameOrdinals, szNameOrdinals, 0));
-
-      OXILog("nNames: %d, nFunctions: %d\n", exportDirectory.NumberOfNames,
-             exportDirectory.NumberOfFunctions);
-      module->nSymbols = exportDirectory.NumberOfFunctions;
-      module->aSymbols = malloc(sizeof(module->aSymbols[0]) * module->nSymbols);
-
-      for (int i = 0; i < module->nSymbols; ++i) {
-        module->aSymbols[i].addr =
-            (u64)adv(info.lpBaseOfDll, pExportAddresses[i]);
-
-        u32 ordinal = exportDirectory.Base + i;
-
-        bool foundName = false;
-        char symname[sizeof(module->aSymbols[0].name)];
-
-        for (int j = 0; j < exportDirectory.NumberOfNames; ++j) {
-          if (pNameOrdinals[j] == i) {
-            void *pSymbolName = adv(info.lpBaseOfDll, pExportNames[j]);
-            OXIAssert(ReadProcessMemory(process.hProcess, pSymbolName, symname,
-                                        sizeof(symname), 0));
-            foundName = true;
-          }
-        }
-
-        if (foundName) {
-          snprintf(module->aSymbols[i].name, sizeof(module->aSymbols[i].name),
-                   "%s", symname);
-        } else {
-          snprintf(module->aSymbols[i].name, sizeof(module->aSymbols[i].name),
-                   "#%u", ordinal);
-        }
-        OXILog("%s %x\n", module->aSymbols[i].name, pExportAddresses[i]);
-      }
-
     } break;
     case OUTPUT_DEBUG_STRING_EVENT: {
       continueStatus = DBG_CONTINUE; // todo checkout...
-      pData->reason = _TEXT("OUTPUT_DEBUG_STRING_EVENT");
+      reason = "OUTPUT_DEBUG_STRING_EVENT";
       OUTPUT_DEBUG_STRING_INFO info = debugEvent.u.DebugString;
       void *buff = malloc(info.nDebugStringLength);
       memset(buff, 0, info.nDebugStringLength);
@@ -243,29 +273,32 @@ void dbgThread(void *param) {
         if (*(wchar_t *)buff) {
           OXILog("\'%ls\'\n", (wchar_t *)buff);
           if (pData->nLog < _countof(pData->log)) {
-            snprintf(pData->log[pData->nLog++], sizeof(pData->log[0]), 
-                        "DebugMessage: \'%ls\'\n", (wchar_t *)buff);
+            snprintf(pData->log[pData->nLog++], sizeof(pData->log[0]),
+                     "DebugMessage: \'%ls\'\n", (wchar_t *)buff);
           }
         }
       } else {
         OXILog("\'%s\'\n", (char *)buff);
         if (pData->nLog < _countof(pData->log)) {
-          snprintf(pData->log[pData->nLog++], sizeof(pData->log[0]), 
-                      "DebugMessage: \'%s\'\n", (char *)buff);
+          snprintf(pData->log[pData->nLog++], sizeof(pData->log[0]),
+                   "DebugMessage: \'%s\'\n", (char *)buff);
         }
       }
       free(buff);
     } break;
     case RIP_EVENT: {
-      pData->reason = _TEXT("RIP_EVENT");
+      reason = "RIP_EVENT";
     } break;
     case UNLOAD_DLL_DEBUG_EVENT: {
-      pData->reason = _TEXT("UNLOAD_DLL_DEBUG_EVENT");
+      reason = "UNLOAD_DLL_DEBUG_EVENT";
     } break;
     case EXIT_PROCESS_DEBUG_EVENT: {
-      pData->reason = _TEXT("EXIT_PROCESS_DEBUG_EVENT");
+      reason = "EXIT_PROCESS_DEBUG_EVENT";
     } break;
     }
+
+    pData->issueThread = debugEvent.dwThreadId;
+    snprintf(pData->reason, _countof(pData->reason), "%s", reason);
 
     // registers -> ui
     pData->ctx = threadCtx;
@@ -273,6 +306,20 @@ void dbgThread(void *param) {
     // instructions -> ui
     OXIAssert(ReadProcessMemory(process.hProcess, (void *)threadCtx.Rip,
                                 pData->itext, sizeof(pData->itext), 0));
+
+    // stack
+    bool hasNextFrame = true;
+    CONTEXT inCtx = pData->ctx;
+    pData->callstack[0] = pData->ctx.Rip;
+    pData->nCallstack = 1;
+    while (hasNextFrame) {
+      hasNextFrame = unwindContext(&inCtx, pData->dll, pData->nDll, pData->process);
+      if (hasNextFrame) {
+        if (pData->nCallstack < _countof(pData->callstack)) {
+          pData->callstack[pData->nCallstack++] = inCtx.Rip;
+        }
+      }
+    }
 
     // sleep until gui gives us some command to process
     while (pData->commandEntered == OXIDbgCommand_None) {
@@ -294,7 +341,7 @@ void dbgThread(void *param) {
     u32 localEnable[4] = {(1 << 0), (1 << 2), (1 << 4), (1 << 6)};
     u32 len[4] = {(0b11 << 18), (0b11 << 22), (0b11 << 26), (0b11 << 30)};
     u32 rw[4] = {(0b11 << 16), (0b11 << 20), (0b11 << 24), (0b11 << 28)};
-    for (int i = 0; i < 4; ++i) {
+    for (u32 i = 0; i < 4; ++i) {
       if (i < pData->nBreakpoints) {
         // enable breakpoint -> 1
         threadCtx.Dr7 |= localEnable[i];
@@ -330,7 +377,7 @@ void dbgThread(void *param) {
 }
 
 // do not break the stack bro...
-UIData uiData = {0};
+static UIData uiData = {0};
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                     PWSTR pCmdLine, int nCmdShow) {

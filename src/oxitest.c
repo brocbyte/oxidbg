@@ -3,15 +3,14 @@
 #include <windows.h>
 #include <stdio.h>
 
-int f() {
-  volatile int a = 2, b = 3;
-  OutputDebugString(_TEXT("EVA 00: Rei Ayanami"));
-  OutputDebugString(_TEXT("EVA 01: Shinji Ikari"));
-  OutputDebugString(_TEXT("EVA 02: Asuka Langley Sohryu"));
-  return a + b;
+__declspec(dllexport) int f() {
+  FILE* f = fopen("test.txt", "w");
+  const char* greet = "hi there";
+  fwrite((void*)greet, 1, strlen(greet), f);
+  fclose(f);
+  return 0;
 }
 
-int main() {
-  f();
-  return 0;
+__declspec(dllexport) int main() {
+  return f();
 }

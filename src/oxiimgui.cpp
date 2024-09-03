@@ -101,7 +101,7 @@ static void tableRegisterHelper(const char *regName, i64 regValue) {
 static i16 findBreakpoint(u64 addr, OXIBreakpoint *breakpoints,
                           u32 nBreakpoints) {
   i16 breakpointIdx = -1;
-  for (int j = 0; j < nBreakpoints; ++j) {
+  for (u32 j = 0; j < nBreakpoints; ++j) {
     if (breakpoints[j].addr == addr) {
       breakpointIdx = j;
     }
@@ -123,7 +123,7 @@ static void breakpointHelper(u32 i, u64 addr, OXIBreakpoint *breakpoints,
   bool hasBreakpoint = breakpointIdx != -1;
   if (hasBreakpoint) {
     if (ImGui::Button("[*]")) {
-      for (int j = breakpointIdx + 1; j < *nBreakpoints; ++j) {
+      for (u32 j = breakpointIdx + 1; j < *nBreakpoints; ++j) {
         breakpoints[j - 1] = breakpoints[j];
       }
       --(*nBreakpoints);
@@ -148,7 +148,7 @@ void OXIImGuiBegFrame(UIData *data) {
   ImGui::ShowDemoWindow();
   ImGui::Begin("Debug");
 
-  ImGui::Text("%ls", data->reason);
+  ImGui::Text("%s %d", data->reason, data->issueThread);
   EnterCriticalSection(&data->critical_section);
 
   ImGui::SetNextWindowSizeConstraints(
@@ -194,7 +194,8 @@ void OXIImGuiBegFrame(UIData *data) {
     filter.Draw();
     for (u32 i = 0; i < data->nDll; ++i) {
       char nodeDllName[256];
-      snprintf(nodeDllName, sizeof(nodeDllName), "%ls", data->dll[i].dllName);
+      snprintf(nodeDllName, sizeof(nodeDllName), "%ls",
+               data->dll[i].moduleNameByHandle);
       if (ImGui::TreeNode(nodeDllName)) {
 
         for (u32 j = 0; j < data->dll[i].nSymbols; ++j) {
@@ -227,10 +228,45 @@ void OXIImGuiBegFrame(UIData *data) {
     ImGui::EndChild();
   }
   ImGui::EndGroup();
+  ImGui::SameLine();
+  ImGui::BeginGroup();
+  ImGui::Text("Threads");
+  if (ImGui::BeginChild("threads", ImVec2(0.0f, 100.0f),
+                        ImGuiChildFlags_AutoResizeX)) {
+    for (int i = 0; i < data->nThreads; ++i) {
+      char threadBuff[256];
+      snprintf(threadBuff, _countof(threadBuff),
+               "hThread: %p localBase: %p startAddr: %p",
+               data->threads[i].hThread, data->threads[i].lpThreadLocalBase,
+               data->threads[i].lpStartAddress);
+      ImGui::PushID(threadBuff);
+      ImGui::PushItemWidth(
+          ImGui::CalcTextSize(threadBuff, threadBuff + strlen(threadBuff) - 1)
+              .x +
+          2.0f * ImGui::GetStyle().FramePadding.x);
+      ImGui::InputText("", threadBuff, sizeof(threadBuff),
+                       ImGuiInputTextFlags_ReadOnly);
+      ImGui::PopItemWidth();
+      ImGui::PopID();
+    }
+    ImGui::EndChild();
+  }
+
+  if (ImGui::BeginChild("callstack", ImVec2(0.0f, 200.0f),
+                        ImGuiChildFlags_AutoResizeX)) {
+    for (u32 i = 0; i < data->nCallstack; ++i) {
+      char src[256];
+      sourceMe(data->callstack[i], src, sizeof(src), data->dll, data->nDll, true);
+      ImGui::Text("%p %s", data->callstack[i], src);
+    }
+    ImGui::EndChild();
+  }
+
+  ImGui::EndGroup();
 
   UIDataAsmLine lines[8];
   decodeInstruction(data->itext, sizeof(data->itext), lines, _countof(lines),
-                    data->ctx.Rip, data->dll, data->nDll);
+                    data->ctx.Rip, data->dll, data->nDll, data->process);
 
   ImGui::BeginChild("DisassemblyAndControls", ImVec2(0, 300),
                     ImGuiChildFlags_Border, ImGuiWindowFlags_None);
@@ -239,14 +275,6 @@ void OXIImGuiBegFrame(UIData *data) {
                       ImGuiWindowFlags_None);
 
     for (int i = 0; i < _countof(lines); ++i) {
-
-      char *truncatedSource = strrchr(lines[i].source, '\\');
-      if (!truncatedSource) {
-        truncatedSource = "nil";
-      } else {
-        ++truncatedSource;
-      }
-
       breakpointHelper(i, lines[i].addr, data->breakpoints, &data->nBreakpoints,
                        _countof(data->breakpoints));
 
@@ -254,7 +282,7 @@ void OXIImGuiBegFrame(UIData *data) {
 
       char line[256];
       snprintf(line, sizeof(line), "%p % 50s % 20s %s", (void *)lines[i].addr,
-               truncatedSource, lines[i].itext, lines[i].decoded);
+               lines[i].source, lines[i].itext, lines[i].decoded);
 
       if (lines[i].addr == data->ctx.Rip) {
         ImDrawList *draw_list = ImGui::GetWindowDrawList();
@@ -269,7 +297,18 @@ void OXIImGuiBegFrame(UIData *data) {
         draw_list->AddRectFilled(p0, p1, col_a);
       }
 
+      if (strstr(lines[i].decoded, "call ") == lines[i].decoded) {
+        ImGui::PushStyleColor(ImGuiCol_Text, (ImVec4)ImColor(200, 141, 40));
+      }
       ImGui::Text(line);
+      if (strstr(lines[i].decoded, "call ") == lines[i].decoded) {
+        ImGui::PopStyleColor();
+      }
+
+      if (lines[i].functionEnd) {
+        ImGui::SeparatorText("function end");
+      }
+
     }
     ImGui::EndChild();
 
@@ -298,7 +337,7 @@ void OXIImGuiBegFrame(UIData *data) {
   if (ImGui::BeginPopup("breakpoint_popup")) {
     ImGui::InputText("Address/Name", breakpoint, IM_ARRAYSIZE(breakpoint));
     if (ImGui::Button("OK")) {
-      long long parsed = atoll(breakpoint);
+      long long parsed = strtoll(breakpoint, 0, 16);
       if (parsed) {
         data->breakpoints[data->nBreakpoints].addr = parsed;
         ++data->nBreakpoints;
@@ -307,10 +346,10 @@ void OXIImGuiBegFrame(UIData *data) {
     ImGui::EndPopup();
   }
 
-  for (int i = 0; i < data->nBreakpoints; ++i) {
+  for (u32 i = 0; i < data->nBreakpoints; ++i) {
     char source[256];
     sourceMe(data->breakpoints[i].addr, source, sizeof(source), data->dll,
-             data->nDll);
+             data->nDll, false);
     ImGui::Text("[%d] %p %s", i, data->breakpoints[i].addr, source);
   }
 
